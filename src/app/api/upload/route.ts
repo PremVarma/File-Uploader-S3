@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
       console.error("Error cleaning tmp directory:", cleanupError);
     }
     return NextResponse.json(
-      { error: "Failed to process upload" },
+      { error: "Failed to process upload: " + error },
       { status: 500 }
     );
   }
