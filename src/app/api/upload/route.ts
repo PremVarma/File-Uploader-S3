@@ -5,14 +5,6 @@ import ffmpeg from "fluent-ffmpeg";
 import { storage } from "@/lib/storage";
 import { S3StorageProvider } from "@/lib/storage/s3-provider";
 
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: "200mb", // Adjust as needed
-    },
-  },
-};
-
 export async function POST(request: NextRequest) {
   // Define the temporary folder and subdirectories.
   const tmpDir = path.join("/tmp", "uploader-s3");
