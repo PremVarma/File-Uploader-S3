@@ -7,7 +7,7 @@ import { S3StorageProvider } from "@/lib/storage/s3-provider";
 
 export async function POST(request: NextRequest) {
   // Define the temporary folder and subdirectories.
-  const tmpDir = path.join(process.cwd(), "tmp");
+  const tmpDir = path.join("/tmp", "uploader-s3");
   const inputDir = path.join(tmpDir, "input");
   const outputDir = path.join(tmpDir, "output");
 
