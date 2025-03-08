@@ -1,12 +1,10 @@
-import React from 'react';
-import { FileUploader } from './components/FileUploader';
-import { Toaster } from 'react-hot-toast';
-import { HardDrive } from 'lucide-react';
+import { FileUploader } from "@/components/FileUploader";
+import { FileList } from "@/components/FileList";
+import { HardDrive } from "lucide-react";
 
-function App() {
+export default function Home() {
   return (
     <div className="min-h-screen bg-gray-100">
-      <Toaster position="top-right" />
       <div className="max-w-4xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-8">
           <HardDrive className="w-12 h-12 text-blue-500 mx-auto mb-4" />
@@ -23,5 +21,3 @@ function App() {
     </div>
   );
 }
-
-export default App;

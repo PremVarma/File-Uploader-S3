@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useEffect, useState } from 'react';
 import { Download, Link, Trash2, AlertCircle } from 'lucide-react';
 import { storage } from '../lib/storage';

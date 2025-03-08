@@ -14,10 +14,10 @@ export class S3StorageProvider implements StorageProvider {
   private isConfigured: boolean;
 
   constructor() {
-    const region = import.meta.env.VITE_AWS_REGION;
-    const accessKeyId = import.meta.env.VITE_AWS_ACCESS_KEY_ID;
-    const secretAccessKey = import.meta.env.VITE_AWS_SECRET_ACCESS_KEY;
-    this.bucketName = import.meta.env.VITE_AWS_BUCKET_NAME;
+    const region = process.env.NEXT_PUBLIC_AWS_REGION;
+    const accessKeyId = process.env.NEXT_PUBLIC_AWS_ACCESS_KEY_ID;
+    const secretAccessKey = process.env.NEXT_PUBLIC_AWS_SECRET_ACCESS_KEY;
+    this.bucketName = process.env.NEXT_PUBLIC_AWS_BUCKET_NAME || "";
 
     this.isConfigured = Boolean(
       region && accessKeyId && secretAccessKey && this.bucketName
@@ -26,18 +26,18 @@ export class S3StorageProvider implements StorageProvider {
     if (!this.isConfigured) {
       console.warn(
         "S3 storage is not properly configured. Please check your environment variables:\n" +
-          "- VITE_AWS_REGION\n" +
-          "- VITE_AWS_ACCESS_KEY_ID\n" +
-          "- VITE_AWS_SECRET_ACCESS_KEY\n" +
-          "- VITE_AWS_BUCKET_NAME"
+          "- NEXT_PUBLIC_AWS_REGION\n" +
+          "- NEXT_PUBLIC_AWS_ACCESS_KEY_ID\n" +
+          "- NEXT_PUBLIC_AWS_SECRET_ACCESS_KEY\n" +
+          "- NEXT_PUBLIC_AWS_BUCKET_NAME"
       );
     }
 
     this.client = new S3Client({
       region,
       credentials: {
-        accessKeyId,
-        secretAccessKey,
+        accessKeyId: accessKeyId || "",
+        secretAccessKey: secretAccessKey || "",
       },
     });
   }
@@ -50,7 +50,7 @@ export class S3StorageProvider implements StorageProvider {
     }
   }
 
-  private async fileToArrayBuffer(file: File): Promise<Uint8Array> {
+  private async fileToArrayBuffer(file: File | Blob): Promise<Uint8Array> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => {
@@ -65,18 +65,44 @@ export class S3StorageProvider implements StorageProvider {
     });
   }
 
-  async uploadFile(file: File): Promise<string> {
+  async uploadFile(file: File | Blob): Promise<string> {
     this.checkConfiguration();
 
     try {
-      const key = `${Date.now()}-${file.name}`;
-      const arrayBuffer = await this.fileToArrayBuffer(file);
+      // Use the original file name if available
+      const fileName =
+        "name" in file && typeof file.name === "string"
+          ? file.name
+          : "blob.mp4";
+      const key = fileName; // Use the file name directly
 
+      let buffer: Uint8Array;
+      if (typeof file.arrayBuffer === "function") {
+        buffer = new Uint8Array(await file.arrayBuffer());
+      } else {
+        buffer = await new Promise<Uint8Array>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            if (reader.result instanceof ArrayBuffer) {
+              resolve(new Uint8Array(reader.result));
+            } else {
+              reject(new Error("Failed to read file"));
+            }
+          };
+          reader.onerror = () => reject(reader.error);
+          reader.readAsArrayBuffer(file);
+        });
+      }
+
+      const contentType =
+        "name" in file && typeof file.type === "string"
+          ? file.type
+          : "video/mp4";
       const command = new PutObjectCommand({
         Bucket: this.bucketName,
         Key: key,
-        Body: arrayBuffer,
-        ContentType: file.type,
+        Body: buffer,
+        ContentType: contentType,
       });
 
       await this.client.send(command);
@@ -86,6 +112,30 @@ export class S3StorageProvider implements StorageProvider {
       throw new Error(
         "Failed to upload file. Please check your S3 configuration and try again."
       );
+    }
+  }
+
+  async uploadUint8Array(
+    data: Uint8Array,
+    fileName: string,
+    contentType: string
+  ): Promise<string> {
+    this.checkConfiguration();
+
+    try {
+      const key = `compressed_${fileName}`;
+      const command = new PutObjectCommand({
+        Bucket: this.bucketName,
+        Key: key,
+        Body: data,
+        ContentType: contentType,
+      });
+
+      await this.client.send(command);
+      return key;
+    } catch (error) {
+      console.error("Error uploading Uint8Array to S3:", error);
+      throw new Error("Failed to upload processed file");
     }
   }
 

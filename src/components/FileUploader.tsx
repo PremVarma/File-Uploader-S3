@@ -1,12 +1,15 @@
-import React, { useCallback, useState } from "react";
-import { Upload, X, Link as LinkIcon } from "lucide-react";
-import { storage } from "../lib/storage";
+"use client";
+
+import React, { useCallback, useRef, useState } from "react";
+import { Upload, X, Link as LinkIcon, Settings } from "lucide-react";
 import toast from "react-hot-toast";
+
+const BASE_URL = "https://kantham-vv.s3.ap-south-1.amazonaws.com/";
 
 interface UploadingFile {
   file: File;
   progress: number;
-  status: "uploading" | "completed" | "error";
+  stage: "processing" | "uploading" | "completed" | "error";
   url?: string;
 }
 
@@ -15,103 +18,144 @@ export const FileUploader: React.FC = () => {
   const [currentUpload, setCurrentUpload] = useState<UploadingFile | null>(
     null
   );
+  const [processFiles, setProcessFiles] = useState(true);
+  const [processingType] = useState<"ffmpeg" | "sharp">("ffmpeg");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setIsDragging(true);
-    } else if (e.type === "dragleave") {
-      setIsDragging(false);
-    }
+    setIsDragging(e.type === "dragenter" || e.type === "dragover");
   }, []);
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
-    e.stopPropagation();
     setIsDragging(false);
-
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) {
-      await handleUpload(files[0]); // Only handle the first file
-    }
+    if (e.dataTransfer.files?.[0]) await handleUpload(e.dataTransfer.files[0]);
   }, []);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length > 0) {
-      await handleUpload(files[0]); // Only handle the first file
-    }
-  };
-
-  const updateProgress = (
-    progress: number,
-    status: UploadingFile["status"],
-    url?: string
-  ) => {
-    setCurrentUpload((prev) =>
-      prev ? { ...prev, progress, status, url } : null
-    );
-  };
-
-  const clearUpload = () => {
-    setCurrentUpload(null);
-  };
-
-  const handleCopyLink = async (url: string) => {
-    try {
-      await navigator.clipboard.writeText(url);
-      toast.success("Link copied to clipboard");
-    } catch (error) {
-      toast.error("Failed to copy link");
+    if (e.target.files?.[0]) {
+      await handleUpload(e.target.files[0]);
+      // Reset the input so the same file can be selected again.
+      e.target.value = "";
     }
   };
 
   const handleUpload = async (file: File) => {
-    // Initialize upload state
-    setCurrentUpload({
-      file,
-      progress: 0,
-      status: "uploading",
-    });
+    setCurrentUpload({ file, progress: 0, stage: "processing" });
 
-    try {
-      // Start progress simulation
-      const progressInterval = setInterval(() => {
-        setCurrentUpload((prev) => {
-          if (prev && prev.status === "uploading" && prev.progress < 90) {
-            return { ...prev, progress: Math.min(90, prev.progress + 10) };
-          }
+    // Simulate processing stage (0-50%)
+    const processingInterval = setInterval(() => {
+      setCurrentUpload((prev) => {
+        if (!prev) return prev;
+        if (prev.progress < 50) {
+          return { ...prev, progress: prev.progress + 3 };
+        } else {
+          clearInterval(processingInterval);
           return prev;
-        });
-      }, 500);
+        }
+      });
+    }, 500);
 
-      // Perform actual upload
-      const key = await storage.uploadFile(file);
+    let response;
+    try {
+      response = await fetch("/api/upload", {
+        method: "POST",
+        body: (() => {
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append("process", processFiles.toString());
+          formData.append("processor", processingType);
+          return formData;
+        })(),
+      });
+    } catch (err) {
+      clearInterval(processingInterval);
+      setCurrentUpload((prev) =>
+        prev ? { ...prev, stage: "error", progress: 0 } : null
+      );
+      toast.error("Error connecting to server");
+      return;
+    }
 
-      // Get the file URL
-      const url = await storage.getSignedUrl(key);
+    clearInterval(processingInterval);
+    // Switch to uploading stage and set progress to 50%.
+    setCurrentUpload((prev) =>
+      prev ? { ...prev, stage: "uploading", progress: 50 } : prev
+    );
 
-      // Clear interval and mark as complete
-      clearInterval(progressInterval);
-      updateProgress(100, "completed", url);
+    const uploadingInterval = setInterval(() => {
+      setCurrentUpload((prev) => {
+        if (!prev) return prev;
+        if (prev.progress < 95) {
+          return { ...prev, progress: prev.progress + 2 };
+        } else {
+          clearInterval(uploadingInterval);
+          return prev;
+        }
+      });
+    }, 500);
 
-      // Clear upload after delay if successful
-      setTimeout(clearUpload, 5000);
+    if (!response.ok) {
+      clearInterval(uploadingInterval);
+      setCurrentUpload((prev) =>
+        prev ? { ...prev, stage: "error", progress: 0 } : null
+      );
+      toast.error("Upload failed");
+      return;
+    }
+    const data = await response.json();
+    clearInterval(uploadingInterval);
+    const finalUrl = `${BASE_URL}${data.fileName}`;
+    setCurrentUpload((prev) =>
+      prev
+        ? { ...prev, stage: "completed", progress: 100, url: finalUrl }
+        : null
+    );
+    toast.success("File uploaded successfully!");
+    setTimeout(() => setCurrentUpload(null), 10000);
+  };
 
-      toast.success("File uploaded successfully!");
-    } catch (error) {
-      console.error("Upload error:", error);
-      updateProgress(0, "error");
-      toast.error("Failed to upload file");
+  const getStageMessage = () => {
+    if (!currentUpload) return "";
+    switch (currentUpload.stage) {
+      case "processing":
+        return "Processing your video...";
+      case "uploading":
+        return "Uploading your video...";
+      case "completed":
+        return "Upload complete!";
+      case "error":
+        return "Upload failed.";
+      default:
+        return "";
     }
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 max-w-2xl mx-auto">
+      <div className="flex items-center justify-between bg-gray-50 p-4 rounded-lg">
+        <div className="flex items-center gap-2">
+          <Settings className="w-5 h-5 text-gray-600" />
+          <span className="text-sm font-medium">Processing Options</span>
+        </div>
+        <label className="flex items-center gap-2">
+          <span className="text-sm text-gray-600">Enable Processing</span>
+          <input
+            type="checkbox"
+            checked={processFiles}
+            onChange={(e) => setProcessFiles(e.target.checked)}
+            className="toggle toggle-sm"
+          />
+        </label>
+      </div>
+
       <div
-        className={`relative border-2 border-dashed rounded-lg p-8 text-center ${
-          isDragging ? "border-blue-500 bg-blue-50" : "border-gray-300"
+        className={`relative border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+          isDragging
+            ? "border-blue-500 bg-blue-50"
+            : "border-gray-300 bg-gray-50"
         }`}
         onDragEnter={handleDrag}
         onDragLeave={handleDrag}
@@ -120,78 +164,83 @@ export const FileUploader: React.FC = () => {
       >
         <input
           type="file"
+          ref={fileInputRef}
           onChange={handleFileSelect}
           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          accept="image/*,video/*"
+          onClick={(e) => e.stopPropagation()}
         />
-        <div className="flex flex-col items-center">
-          <Upload className="w-12 h-12 text-gray-400 mb-4" />
-          <p className="text-lg font-medium text-gray-700">
-            Drag and drop your file here
-          </p>
-          <p className="text-sm text-gray-500 mt-2">
-            or click to select a file
-          </p>
+        <div className="flex flex-col items-center gap-4 pointer-events-none">
+          <Upload className="w-12 h-12 text-gray-400" />
+          <div>
+            <p className="font-medium text-gray-700">Drag files here</p>
+            <p className="text-sm text-gray-500 mt-1">or click to browse</p>
+            <p className="text-xs text-gray-400 mt-2">
+              Supported formats: JPEG, PNG, MP4, MOV
+            </p>
+          </div>
         </div>
       </div>
 
-      {/* Current Upload Progress */}
       {currentUpload && (
-        <div className="bg-white rounded-lg border p-3">
-          <div className="flex-1">
-            <div className="flex justify-between items-center mb-1">
-              <span className="text-sm font-medium text-gray-900">
-                {currentUpload.file.name}
-              </span>
-              {currentUpload.status === "uploading" && (
-                <button
-                  onClick={clearUpload}
-                  className="text-gray-400 hover:text-gray-500"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
+        <div className="bg-white rounded-lg border p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-medium truncate">
+              {currentUpload.file.name}
+            </span>
+            {currentUpload.stage !== "completed" && (
+              <button
+                onClick={() => setCurrentUpload(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+
+          <div className="relative pt-1">
+            <div className="flex mb-2 items-center justify-between">
+              <div className="text-xs text-gray-500">{getStageMessage()}</div>
+              <div className="text-xs text-gray-500">
+                {(currentUpload.file.size / 1024 / 1024).toFixed(1)} MB
+              </div>
             </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
+            <div className="overflow-hidden h-2 bg-gray-200 rounded-full">
               <div
-                className={`h-2 rounded-full ${
-                  currentUpload.status === "error"
+                className={`h-2 rounded-full transition-all duration-300 ${
+                  currentUpload.stage === "error"
                     ? "bg-red-500"
-                    : currentUpload.status === "completed"
+                    : currentUpload.stage === "completed"
                     ? "bg-green-500"
+                    : currentUpload.stage === "processing"
+                    ? "bg-orange-500"
                     : "bg-blue-500"
                 }`}
                 style={{ width: `${currentUpload.progress}%` }}
               />
             </div>
-            <div className="flex justify-between items-center mt-1">
-              <span className="text-xs text-gray-500">
-                {currentUpload.status === "error"
-                  ? "Upload failed"
-                  : currentUpload.status === "completed"
-                  ? "Upload complete"
-                  : `${currentUpload.progress}%`}
-              </span>
-              <span className="text-xs text-gray-500">
-                {(currentUpload.file.size / 1024 / 1024).toFixed(2)} MB
-              </span>
-            </div>
-
-            {/* Show copy link button when upload is complete */}
-            {currentUpload.status === "completed" && currentUpload.url && (
-              <div className="mt-2 flex items-center justify-between">
-                <span className="text-sm text-gray-500 truncate flex-1 mr-4">
-                  {currentUpload.url}
-                </span>
-                <button
-                  onClick={() => handleCopyLink(currentUpload.url!)}
-                  className="flex items-center text-blue-500 hover:text-blue-600 text-sm"
-                >
-                  <LinkIcon className="w-4 h-4 mr-1" />
-                  Copy Link
-                </button>
-              </div>
-            )}
           </div>
+
+          {currentUpload.url && (
+            <div className="mt-4 flex items-center gap-2">
+              <input
+                value={currentUpload.url}
+                readOnly
+                className="flex-1 text-sm p-2 border rounded bg-gray-50 truncate"
+              />
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigator.clipboard.writeText(currentUpload.url!);
+                  toast.success("Copied to clipboard!");
+                }}
+                className="btn btn-sm btn-outline"
+              >
+                <LinkIcon className="w-4 h-4 mr-2" />
+                Copy
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

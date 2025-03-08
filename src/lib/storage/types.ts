@@ -6,7 +6,7 @@ export interface StorageFile {
 }
 
 export interface StorageProvider {
-  uploadFile(file: File): Promise<string>;
+  uploadFile(file: File | Blob): Promise<string>;
   deleteFile(key: string): Promise<void>;
   getSignedUrl(key: string): Promise<string>;
   listFiles(): Promise<StorageFile[]>;
