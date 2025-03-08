@@ -4,7 +4,7 @@ import React, { useCallback, useRef, useState } from "react";
 import { Upload, X, Link as LinkIcon, Settings } from "lucide-react";
 import toast from "react-hot-toast";
 
-const BASE_URL = "https://kantham-vv.s3.ap-south-1.amazonaws.com/";
+const BASE_URL = "https://d11w9f5bh2eg3a.cloudfront.net/";
 
 interface UploadingFile {
   file: File;
